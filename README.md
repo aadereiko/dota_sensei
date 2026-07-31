@@ -128,6 +128,37 @@ placeholder, and changing it signs everyone out.
 Once signed in, `POST /api/sync` needs no body: the server reads the account from
 the session. You can still pass an explicit `account_id` to look at anyone else.
 
+### Public match data, and the way around it
+
+OpenDota can only list your matches if **Dota 2 → Settings → Options → Advanced
+Options → "Expose Public Match Data"** is enabled. With it off, `/api/sync`
+returns `matches_seen: 0` — the profile still resolves, but OpenDota reports
+`fh_unavailable: true` and has no history to give. Turning it on appears to start
+your history from that point rather than backfilling, because OpenDota stores
+each match as it's played and anonymises players who hadn't opted in.
+
+`POST /api/matches/import` is the way around that. Matches are public even when
+the players in them are anonymous, so a match id from your Dota client still
+yields a full breakdown:
+
+```jsonc
+POST /api/matches/import  { "match_id": 8922669985 }
+
+// If your account is visible in the match, done:
+{ "match_id": ..., "resolved": true, "insights_created": 3 }
+
+// If you were anonymised, we can't know which of the ten is you:
+{ "match_id": ..., "resolved": false, "candidates": [ /* ten slots */ ] }
+
+// so post again naming your slot:
+POST /api/matches/import  { "match_id": 8922669985, "player_slot": 1 }
+```
+
+Claiming an anonymous slot writes your `account_id` onto that row, so the match
+then behaves like any other — it shows up in your match list and feeds the
+recurring-mistakes rollup. Claiming a slot that already belongs to a different
+identified account is refused with a 409.
+
 ### Layout
 
 ```
@@ -166,6 +197,7 @@ frontend/
 | GET | `/api/auth/me` | signed-in user (401 if not) |
 | POST | `/api/auth/logout` | clear the session |
 | POST | `/api/sync` | pull recent matches, run analysis |
+| POST | `/api/matches/import` | analyse one match by id (works without public history) |
 | GET | `/api/players/{id}` | profile |
 | GET | `/api/players/{id}/matches` | match list with insight counts |
 | GET | `/api/players/{id}/matches/{match_id}` | full breakdown + insights |

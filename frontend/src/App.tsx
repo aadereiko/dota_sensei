@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { api, UnauthorizedError } from "@/api";
+import { ImportMatch } from "@/components/ImportMatch";
 import { InsightCard } from "@/components/InsightCard";
 import { MatchRow } from "@/components/MatchRow";
 import { SignedInAs, SteamLoginButton } from "@/components/SteamAuth";
@@ -154,6 +155,15 @@ export default function App() {
                 Viewing account <span className="font-mono">{accountId}</span>
               </p>
             )}
+
+            <ImportMatch
+              accountId={accountId}
+              viewingSelf={viewingSelf}
+              onImported={() => {
+                queryClient.invalidateQueries({ queryKey: ["matches", accountId] });
+                queryClient.invalidateQueries({ queryKey: ["recurring", accountId] });
+              }}
+            />
 
             <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
               Recurring mistakes

@@ -68,6 +68,28 @@ export interface RecurringMistake {
   severity: Severity;
 }
 
+export interface MatchSlot {
+  player_slot: number;
+  is_radiant: boolean;
+  hero_id: number;
+  account_id: number | null;
+  won: boolean;
+  kills: number | null;
+  deaths: number | null;
+  assists: number | null;
+  gold_per_min: number | null;
+  net_worth: number | null;
+}
+
+export interface MatchImportResult {
+  match_id: number;
+  /** False when we couldn't tell which player is you — pick from candidates. */
+  resolved: boolean;
+  is_parsed: boolean;
+  insights_created: number;
+  candidates: MatchSlot[];
+}
+
 export interface SyncResult {
   account_id: number;
   matches_seen: number;

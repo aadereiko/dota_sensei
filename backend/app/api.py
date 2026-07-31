@@ -2,6 +2,7 @@
 
 from typing import Annotated
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,12 +14,14 @@ from app.db import get_session
 from app.models import Insight, Match, MatchPlayer, Player
 from app.schemas import (
     MatchDetailOut,
+    MatchImportRequest,
+    MatchImportResult,
     MatchSummaryOut,
     PlayerOut,
     SyncRequest,
     SyncResult,
 )
-from app.services.ingest import sync_player
+from app.services.ingest import SlotTakenError, import_match, sync_player
 
 router = APIRouter(prefix="/api")
 
@@ -54,6 +57,30 @@ async def sync(
     if account_id is None:
         raise HTTPException(400, "sign in with Steam or pass an account_id")
     return await sync_player(session, account_id, payload.limit)
+
+
+@router.post("/matches/import", response_model=MatchImportResult)
+async def import_match_by_id(
+    payload: MatchImportRequest, session: SessionDep, signed_in: OptionalAccount
+) -> MatchImportResult:
+    """Analyse one match by id — the path for accounts without public history.
+
+    Returns `resolved: false` plus the ten slots when we can't tell which player
+    is you; post again with `player_slot` to claim one.
+    """
+    account_id = payload.account_id or signed_in
+    if account_id is None:
+        raise HTTPException(400, "sign in with Steam or pass an account_id")
+    try:
+        return await import_match(
+            session, payload.match_id, account_id, payload.player_slot
+        )
+    except SlotTakenError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(404, f"OpenDota has no match {payload.match_id}") from exc
+        raise HTTPException(502, f"OpenDota error: {exc.response.status_code}") from exc
 
 
 @router.get("/players/{account_id}", response_model=PlayerOut)

@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analysis import evaluate_all
 from app.models import Insight, Match, MatchPlayer, Player
-from app.schemas import SyncResult
+from app.schemas import MatchImportResult, MatchSlotOut, SyncResult
 from app.services.opendota import OpenDotaClient
 
 
@@ -161,6 +161,95 @@ async def analyse_performance(session: AsyncSession, performance: MatchPlayer) -
             )
         )
     return len(findings)
+
+
+def resolve_slot(
+    players: list[dict[str, Any]], account_id: int, player_slot: int | None
+) -> dict[str, Any] | None:
+    """Work out which of the ten players is the user.
+
+    An explicit slot wins. Otherwise we can only tell if their account is visible
+    in the match — which it won't be when the whole point is that OpenDota
+    anonymised them. Returns None to mean "ask the user".
+    """
+    if player_slot is not None:
+        return next((p for p in players if p.get("player_slot") == player_slot), None)
+    mine = [p for p in players if p.get("account_id") == account_id]
+    return mine[0] if len(mine) == 1 else None
+
+
+class SlotTakenError(Exception):
+    """The requested slot already belongs to a different, identified account."""
+
+
+async def import_match(
+    session: AsyncSession,
+    match_id: int,
+    account_id: int,
+    player_slot: int | None = None,
+    client: OpenDotaClient | None = None,
+) -> MatchImportResult:
+    """Ingest a single match by id and analyse the user's slot in it.
+
+    This is the escape hatch for accounts without public match history: the match
+    itself is public even when the player in it is anonymous, so pasting a match
+    id from the Dota client still gets you a breakdown.
+    """
+    async with client or OpenDotaClient() as api:
+        detail = await api.match(match_id)
+
+    raw_players: list[dict[str, Any]] = detail.get("players") or []
+    performances = await ingest_match(session, detail)
+    is_parsed = detail.get("version") is not None
+
+    chosen = resolve_slot(raw_players, account_id, player_slot)
+    if chosen is None:
+        # Store the match anyway — it's useful — but let the caller pick a slot.
+        return MatchImportResult(
+            match_id=match_id,
+            resolved=False,
+            is_parsed=is_parsed,
+            candidates=[
+                MatchSlotOut(
+                    player_slot=p.get("player_slot", 0),
+                    is_radiant=p.get("player_slot", 0) < 128,
+                    hero_id=p.get("hero_id") or 0,
+                    account_id=p.get("account_id"),
+                    won=_won(p.get("player_slot", 0), detail.get("radiant_win")),
+                    kills=p.get("kills"),
+                    deaths=p.get("deaths"),
+                    assists=p.get("assists"),
+                    gold_per_min=p.get("gold_per_min"),
+                    net_worth=p.get("net_worth") or p.get("total_gold"),
+                )
+                for p in raw_players
+            ],
+        )
+
+    slot = chosen.get("player_slot", 0)
+    performance = next((p for p in performances if p.player_slot == slot), None)
+    if performance is None:
+        raise SlotTakenError(f"slot {slot} is not in match {match_id}")
+
+    # Claiming an anonymous slot is the whole point. Claiming someone else's
+    # identified slot is not.
+    if performance.account_id is not None and performance.account_id != account_id:
+        raise SlotTakenError(
+            f"slot {slot} belongs to account {performance.account_id}"
+        )
+    if performance.account_id is None:
+        performance.account_id = account_id
+        await session.flush()
+
+    await session.refresh(performance, ["match"])
+    created = await analyse_performance(session, performance)
+    await session.flush()
+    return MatchImportResult(
+        match_id=match_id,
+        resolved=True,
+        is_parsed=is_parsed,
+        insights_created=created,
+    )
 
 
 async def sync_player(

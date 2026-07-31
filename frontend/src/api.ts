@@ -3,6 +3,7 @@
 import type {
   CurrentUser,
   MatchDetail,
+  MatchImportResult,
   MatchSummary,
   Player,
   RecurringMistake,
@@ -49,6 +50,20 @@ export const api = {
 
   recurring: (accountId: number) =>
     request<RecurringMistake[]>(`/players/${accountId}/insights/recurring`),
+
+  /**
+   * Analyse a single match by id. Pass playerSlot on a second call when the
+   * first comes back unresolved.
+   */
+  importMatch: (matchId: number, accountId: number | null, playerSlot?: number) =>
+    request<MatchImportResult>("/matches/import", {
+      method: "POST",
+      body: JSON.stringify({
+        match_id: matchId,
+        account_id: accountId,
+        player_slot: playerSlot ?? null,
+      }),
+    }),
 
   /** Omit accountId to sync whoever is signed in. */
   sync: (accountId: number | null, limit = 20) =>

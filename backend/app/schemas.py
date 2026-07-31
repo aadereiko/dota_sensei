@@ -78,6 +78,43 @@ class SyncRequest(BaseModel):
     limit: int = 20
 
 
+class MatchImportRequest(BaseModel):
+    """Analyse one match by id, for people whose history isn't public.
+
+    `account_id` defaults to the signed-in user. `player_slot` says which of the
+    ten players is you — needed only when we can't work it out ourselves.
+    """
+
+    match_id: int
+    account_id: int | None = None
+    player_slot: int | None = None
+
+
+class MatchSlotOut(BaseModel):
+    """One slot in a match, enough for a human to recognise themselves."""
+
+    player_slot: int
+    is_radiant: bool
+    hero_id: int
+    account_id: int | None
+    won: bool
+    kills: int | None
+    deaths: int | None
+    assists: int | None
+    gold_per_min: int | None
+    net_worth: int | None
+
+
+class MatchImportResult(BaseModel):
+    match_id: int
+    # False when the match was stored but we couldn't tell which player is you;
+    # pick from `candidates` and post again with player_slot.
+    resolved: bool
+    is_parsed: bool = False
+    insights_created: int = 0
+    candidates: list[MatchSlotOut] = []
+
+
 class SyncResult(BaseModel):
     account_id: int
     matches_seen: int
