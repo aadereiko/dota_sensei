@@ -34,6 +34,31 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
 
 
+class Hero(Base):
+    """Hero metadata from OpenDota's /constants/heroes.
+
+    Changes per patch, not per request, so it's cached here rather than fetched
+    with each match. `roles` is what lets the analysis rules say something
+    sensible about a support without needing a parsed replay.
+    """
+
+    __tablename__ = "heroes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64))  # npc_dota_hero_rubick
+    localized_name: Mapped[str] = mapped_column(String(64))  # Rubick
+    primary_attr: Mapped[str | None] = mapped_column(String(8))
+    attack_type: Mapped[str | None] = mapped_column(String(16))
+    roles: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    # Paths relative to Steam's CDN; see HERO_IMAGE_BASE.
+    img: Mapped[str | None] = mapped_column(String(256))
+    icon: Mapped[str | None] = mapped_column(String(256))
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class Player(Base):
     __tablename__ = "players"
 
@@ -137,6 +162,12 @@ class MatchPlayer(Base):
     item_timings: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     match: Mapped["Match"] = relationship(back_populates="players")
+    # No FK: heroes are a cache that may not be populated yet, and a missing
+    # hero row must not block ingesting a match.
+    hero: Mapped["Hero | None"] = relationship(
+        primaryjoin="foreign(MatchPlayer.hero_id) == Hero.id",
+        viewonly=True,
+    )
     player: Mapped["Player | None"] = relationship(
         back_populates="performances",
         primaryjoin="foreign(MatchPlayer.account_id) == Player.account_id",

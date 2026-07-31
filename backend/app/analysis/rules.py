@@ -5,45 +5,72 @@ work is adding more — feeding off `timeline` (deaths by minute, gold curves)
 rather than just the summary stat line.
 """
 
+from math import ceil
+
 from app.analysis.base import (
-    CORE_ROLES,
-    SUPPORT_ROLES,
     Finding,
     benchmark_pct,
+    guess_role,
     minutes,
     rule,
 )
 from app.models import MatchPlayer
+
+# What to suggest when farm is low, by role. Advice that tells a support to
+# optimise their jungle route is worse than no advice at all.
+_FARM_ADVICE = {
+    "core": (
+        "That usually means idle time between fights — check your jungle route "
+        "after a lane win and whether you're stacking camps."
+    ),
+    "support": (
+        "Low farm is normal on a support, but this is low even measured against "
+        "other games on this hero. Usually it's unspent downtime: stack a camp "
+        "while you wait, and pick up the waves your cores walk past."
+    ),
+    None: (
+        "That usually means unspent downtime — time where you were neither "
+        "fighting nor taking gold from somewhere on the map."
+    ),
+}
 
 
 @rule("farm_below_benchmark")
 def farm_below_benchmark(p: MatchPlayer) -> Finding | None:
     """GPM in the bottom third for this hero.
 
-    No role gate: OpenDota's benchmarks are per-hero, so the percentile is already
-    normalised for what the hero is meant to be doing. That also means this rule
-    still works on unparsed matches, where `lane_role` is null.
+    Fires regardless of role — OpenDota's benchmarks are per-hero, so the
+    percentile is already normalised for what the hero is meant to be doing. What
+    *does* depend on role is the advice, so only the wording branches.
     """
     pct = benchmark_pct(p, "gold_per_min")
     if pct is None or pct >= 0.35:
         return None
+    role = guess_role(p)
+    # Round *up*, and never below 1: round() would render a 0.5th-percentile
+    # game as "the bottom 0%", which reads as nonsense.
+    bottom_pct = max(1, ceil(pct * 100))
     return Finding(
         rule_key="farm_below_benchmark",
         severity="critical" if pct < 0.2 else "warn",
         title="Farm well below par for this hero",
         detail=(
-            f"{p.gold_per_min} GPM puts you in the bottom {round(pct * 100)}% of this hero's "
-            "games. That usually means idle time between fights — check your jungle "
-            "route after a lane win and whether you're stacking camps."
+            f"{p.gold_per_min} GPM puts you in the bottom {bottom_pct}% of "
+            f"this hero's games. {_FARM_ADVICE[role]}"
         ),
-        metrics={"gpm": p.gold_per_min, "gpm_percentile": pct},
+        metrics={
+            "gpm": p.gold_per_min,
+            # Same number the sentence quotes, so the card can't contradict itself.
+            "bottom_percent": bottom_pct,
+            "role": role or "unknown",
+        },
     )
 
 
 @rule("last_hit_efficiency")
 def last_hit_efficiency(p: MatchPlayer) -> Finding | None:
     """Core averaging under ~5 last hits/minute over a full-length game."""
-    if p.lane_role not in CORE_ROLES or p.last_hits is None:
+    if guess_role(p) != "core" or p.last_hits is None:
         return None
     mins = minutes(p)
     if mins < 20:
@@ -83,14 +110,15 @@ def death_count_high(p: MatchPlayer) -> Finding | None:
             "repeated deaths in the same lane usually mean a missing ward, not a "
             "mechanical mistake."
         ),
-        metrics={"deaths": p.deaths, "deaths_per_10_min": round(deaths_per_10, 2)},
+        # 1dp to match the sentence above — two roundings of one number read as a bug.
+        metrics={"deaths": p.deaths, "deaths_per_10_min": round(deaths_per_10, 1)},
     )
 
 
 @rule("vision_deficit")
 def vision_deficit(p: MatchPlayer) -> Finding | None:
     """Support who barely warded."""
-    if p.lane_role not in SUPPORT_ROLES:
+    if guess_role(p) != "support":
         return None
     obs = p.obs_placed or 0
     sen = p.sen_placed or 0

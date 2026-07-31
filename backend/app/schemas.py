@@ -43,6 +43,8 @@ class MatchSummaryOut(ORMModel):
     start_time: datetime
     duration_seconds: int
     hero_id: int
+    hero_name: str | None = None
+    hero_icon_url: str | None = None
     won: bool
     kills: int | None
     deaths: int | None
@@ -96,6 +98,9 @@ class MatchSlotOut(BaseModel):
     player_slot: int
     is_radiant: bool
     hero_id: int
+    # Without a name here, "which of these ten was you" is unanswerable.
+    hero_name: str | None = None
+    hero_icon_url: str | None = None
     account_id: int | None
     won: bool
     kills: int | None

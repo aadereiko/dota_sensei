@@ -16,6 +16,8 @@ export interface MatchSummary {
   start_time: string;
   duration_seconds: number;
   hero_id: number;
+  hero_name: string | null;
+  hero_icon_url: string | null;
   won: boolean;
   kills: number | null;
   deaths: number | null;
@@ -72,6 +74,8 @@ export interface MatchSlot {
   player_slot: number;
   is_radiant: boolean;
   hero_id: number;
+  hero_name: string | null;
+  hero_icon_url: string | null;
   account_id: number | null;
   won: boolean;
   kills: number | null;

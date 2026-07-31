@@ -29,8 +29,12 @@ export function MatchRow({ match, selected, onSelect }: Props) {
       >
         {match.won ? "W" : "L"}
       </span>
-      {/* Hero names need the /heroStats lookup — showing the id until that lands. */}
-      <span className="w-20 text-slate-300">hero {match.hero_id}</span>
+      <span className="flex w-36 items-center gap-2 text-slate-300">
+        {match.hero_icon_url && (
+          <img src={match.hero_icon_url} alt="" className="size-5 shrink-0" loading="lazy" />
+        )}
+        <span className="truncate">{match.hero_name ?? `hero ${match.hero_id}`}</span>
+      </span>
       <span className="w-20 font-mono text-slate-400">
         {match.kills}/{match.deaths}/{match.assists}
       </span>

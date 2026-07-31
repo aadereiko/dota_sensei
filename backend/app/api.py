@@ -21,6 +21,7 @@ from app.schemas import (
     SyncRequest,
     SyncResult,
 )
+from app.services.heroes import hero_image_url
 from app.services.ingest import SlotTakenError, import_match, sync_player
 
 router = APIRouter(prefix="/api")
@@ -103,7 +104,11 @@ async def list_matches(
                 select(MatchPlayer)
                 .join(Match)
                 .where(MatchPlayer.account_id == account_id)
-                .options(selectinload(MatchPlayer.match), selectinload(MatchPlayer.insights))
+                .options(
+                    selectinload(MatchPlayer.match),
+                    selectinload(MatchPlayer.insights),
+                    selectinload(MatchPlayer.hero),
+                )
                 .order_by(Match.start_time.desc())
                 .limit(limit)
             )
@@ -120,7 +125,11 @@ async def get_match(account_id: int, match_id: int, session: SessionDep) -> Matc
         await session.execute(
             select(MatchPlayer)
             .where(MatchPlayer.account_id == account_id, MatchPlayer.match_id == match_id)
-            .options(selectinload(MatchPlayer.match), selectinload(MatchPlayer.insights))
+            .options(
+                    selectinload(MatchPlayer.match),
+                    selectinload(MatchPlayer.insights),
+                    selectinload(MatchPlayer.hero),
+                )
         )
     ).scalar_one_or_none()
     if row is None:
@@ -193,11 +202,14 @@ def _summary(row: MatchPlayer) -> MatchSummaryOut:
         key=lambda s: SEVERITY_ORDER.get(s, 0),
         default=None,
     )
+    hero = row.__dict__.get("hero")
     return MatchSummaryOut(
         match_id=row.match_id,
         start_time=row.match.start_time,
         duration_seconds=row.match.duration_seconds,
         hero_id=row.hero_id,
+        hero_name=hero.localized_name if hero else None,
+        hero_icon_url=hero_image_url(hero.icon) if hero else None,
         won=row.won,
         kills=row.kills,
         deaths=row.deaths,

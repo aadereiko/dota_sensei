@@ -60,6 +60,11 @@ Vite uses `strictPort`, so a clash fails loudly instead of silently drifting to 
 
 ### Data model
 
+`heroes` caches OpenDota's `/constants/heroes` (127 rows, changes per patch, no
+API key). It supplies display names and icons, and — more importantly — the
+`roles` tags that let the analysis rules tell a support from a core on an
+unparsed match. It's populated lazily on first sync or import.
+
 `match_players` is the grain everything hangs off — one row per (match, player),
 holding the stat line plus JSONB blobs for the per-minute series (`timeline`),
 OpenDota's hero percentile `benchmarks`, and `item_timings`. `insights` are
@@ -80,15 +85,31 @@ No DB, no network — so each one unit-tests by constructing a `MatchPlayer`.
 Four starters ship: `farm_below_benchmark`, `last_hit_efficiency`,
 `death_count_high`, `vision_deficit`. Adding a rule is one function plus one test.
 
-**Parsed vs. unparsed matches.** OpenDota only fills in `lane_role`, the
-per-minute series and the purchase log for matches whose replay it has *parsed* —
-in practice most of your recent games are not. Rules that gate on role therefore
-can't run on them, which is why `matches.is_parsed` is stored and surfaced in the
-API and UI: a match with no findings is genuinely clean, or simply unparsed, and
-you should be able to tell which. `farm_below_benchmark` deliberately has no role
-gate — OpenDota's benchmarks are per-hero and so already role-normalised.
-`OpenDotaClient.request_parse()` asks for a parse; wiring it into the sync flow is
-the obvious next step.
+**Knowing the role without a parsed replay.** OpenDota only fills in `lane_role`,
+the per-minute series and the purchase log for matches whose replay it has
+*parsed* — in practice most of your recent games are not. That used to mean the
+role-gated rules never ran at all on them.
+
+`guess_role()` closes most of the gap by falling back to the hero's static role
+tags from `/constants/heroes`, which are available for every match:
+
+```python
+lane_role in {1, 2}        -> "core"      # parsed replay, authoritative
+lane_role in {3, 4}        -> "support"
+"Support" in hero.roles and "Carry" not in hero.roles  -> "support"
+"Carry" in hero.roles and "Support" not in hero.roles  -> "core"
+otherwise                  -> None        # e.g. Windranger, tagged both
+```
+
+It's a weaker signal — someone can play a hero off-role — so heroes tagged both
+Carry and Support resolve to `None` rather than being guessed at, and
+`role_is_certain()` reports which source was used. In practice this took a real
+unparsed Rubick game from two findings to three, and swapped "check your jungle
+route" for advice a support can actually use.
+
+`matches.is_parsed` is still stored and surfaced, since the timeline-based rules
+genuinely need a parse. `OpenDotaClient.request_parse()` asks for one; wiring it
+into the sync flow is the obvious next step.
 
 ### Steam sign-in
 
@@ -235,7 +256,9 @@ automatically is a human clicking through Steam's login page.
 
 Next up:
 
-- Hero names and icons from `/heroStats` (the UI shows raw hero ids today)
+- Findings can't reference each other, so 17 deaths and bottom-1% farm show up as
+  two peer problems when the first plainly causes the second. Rules need a second
+  pass over the whole finding set to rank and subordinate.
 - Request a parse automatically for unparsed matches, then re-analyse
 - Rules that read `timeline`: death clustering, item timing vs. benchmark,
   lane-phase outcome, gold-curve stalls

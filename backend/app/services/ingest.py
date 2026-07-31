@@ -19,8 +19,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analysis import evaluate_all
-from app.models import Insight, Match, MatchPlayer, Player
+from app.models import Hero, Insight, Match, MatchPlayer, Player
 from app.schemas import MatchImportResult, MatchSlotOut, SyncResult
+from app.services.heroes import ensure_heroes, hero_image_url, hero_map
 from app.services.opendota import OpenDotaClient
 
 
@@ -163,6 +164,16 @@ async def analyse_performance(session: AsyncSession, performance: MatchPlayer) -
     return len(findings)
 
 
+def _hero_name(heroes: dict[int, Hero], hero_id: int | None) -> str | None:
+    hero = heroes.get(hero_id or 0)
+    return hero.localized_name if hero else None
+
+
+def _hero_icon(heroes: dict[int, Hero], hero_id: int | None) -> str | None:
+    hero = heroes.get(hero_id or 0)
+    return hero_image_url(hero.icon) if hero else None
+
+
 def resolve_slot(
     players: list[dict[str, Any]], account_id: int, player_slot: int | None
 ) -> dict[str, Any] | None:
@@ -195,12 +206,14 @@ async def import_match(
     itself is public even when the player in it is anonymous, so pasting a match
     id from the Dota client still gets you a breakdown.
     """
+    await ensure_heroes(session, client)
     async with client or OpenDotaClient() as api:
         detail = await api.match(match_id)
 
     raw_players: list[dict[str, Any]] = detail.get("players") or []
     performances = await ingest_match(session, detail)
     is_parsed = detail.get("version") is not None
+    heroes = await hero_map(session)
 
     chosen = resolve_slot(raw_players, account_id, player_slot)
     if chosen is None:
@@ -214,6 +227,8 @@ async def import_match(
                     player_slot=p.get("player_slot", 0),
                     is_radiant=p.get("player_slot", 0) < 128,
                     hero_id=p.get("hero_id") or 0,
+                    hero_name=_hero_name(heroes, p.get("hero_id")),
+                    hero_icon_url=_hero_icon(heroes, p.get("hero_id")),
                     account_id=p.get("account_id"),
                     won=_won(p.get("player_slot", 0), detail.get("radiant_win")),
                     kills=p.get("kills"),
@@ -241,7 +256,9 @@ async def import_match(
         performance.account_id = account_id
         await session.flush()
 
-    await session.refresh(performance, ["match"])
+    # `hero` must be eagerly loaded: the rules read hero.roles to tell a support
+    # from a core, and a lazy load inside sync rule code would blow up.
+    await session.refresh(performance, ["match", "hero"])
     created = await analyse_performance(session, performance)
     await session.flush()
     return MatchImportResult(
@@ -258,6 +275,7 @@ async def sync_player(
     limit: int = 20,
     client: OpenDotaClient | None = None,
 ) -> SyncResult:
+    await ensure_heroes(session, client)
     async with client or OpenDotaClient() as api:
         await upsert_player(session, account_id, await api.player(account_id))
         recent = await api.recent_matches(account_id, limit=limit)
@@ -286,8 +304,9 @@ async def sync_player(
             ingested += 1
             for performance in performances:
                 if performance.account_id == account_id:
-                    # `match` is needed by the rules for duration.
-                    await session.refresh(performance, ["match"])
+                    # `match` for duration; `hero` because the rules read
+                    # hero.roles, and a lazy load in sync rule code would blow up.
+                    await session.refresh(performance, ["match", "hero"])
                     insights += await analyse_performance(session, performance)
 
         await session.flush()

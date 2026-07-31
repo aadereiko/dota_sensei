@@ -112,7 +112,12 @@ function SlotPicker({
             <span className={slot.is_radiant ? "text-win" : "text-loss"}>
               {slot.is_radiant ? "R" : "D"}
             </span>
-            <span className="w-16 text-slate-300">hero {slot.hero_id}</span>
+            {slot.hero_icon_url && (
+              <img src={slot.hero_icon_url} alt="" className="size-5 shrink-0" loading="lazy" />
+            )}
+            <span className="w-28 truncate text-slate-300">
+              {slot.hero_name ?? `hero ${slot.hero_id}`}
+            </span>
             <span className="font-mono text-slate-400">
               {slot.kills}/{slot.deaths}/{slot.assists}
             </span>
