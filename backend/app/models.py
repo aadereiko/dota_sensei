@@ -133,6 +133,11 @@ class Match(Base):
     # lane_role, per-minute series and the purchase log — so the role-gated
     # rules can only run on these. Use OpenDotaClient.request_parse to fill gaps.
     is_parsed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Per-minute net advantage, radiant minus dire. Positive = radiant ahead.
+    # Parsed matches only; empty otherwise.
+    radiant_gold_adv: Mapped[list[int] | None] = mapped_column(JSONB)
+    radiant_xp_adv: Mapped[list[int] | None] = mapped_column(JSONB)
     raw: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     players: Mapped[list["MatchPlayer"]] = relationship(
@@ -182,6 +187,13 @@ class MatchPlayer(Base):
     sen_placed: Mapped[int | None] = mapped_column(Integer)
     camps_stacked: Mapped[int | None] = mapped_column(Integer)
     stuns_seconds: Mapped[float | None] = mapped_column(Float)
+    level: Mapped[int | None] = mapped_column(Integer)
+
+    # --- Inventory (present even on unparsed matches) ---
+    # Six main slots as item ids; 0 means empty.
+    items: Mapped[list[int] | None] = mapped_column(JSONB)
+    backpack: Mapped[list[int] | None] = mapped_column(JSONB)
+    item_neutral: Mapped[int | None] = mapped_column(Integer)
 
     # --- Series & derived blobs (only present once detail is fetched) ---
     # gold_t / xp_t / lh_t per-minute arrays, purchase_log, kills_log, etc.

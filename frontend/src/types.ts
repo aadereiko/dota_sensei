@@ -94,6 +94,51 @@ export interface RecurringMistake {
   severity: Severity;
 }
 
+export interface ItemRef {
+  id: number;
+  name: string;
+  image_url: string | null;
+}
+
+export interface ScoreboardPlayer {
+  player_slot: number;
+  is_radiant: boolean;
+  account_id: number | null;
+  hero_id: number;
+  hero_name: string | null;
+  hero_icon_url: string | null;
+  level: number | null;
+  kills: number | null;
+  deaths: number | null;
+  assists: number | null;
+  last_hits: number | null;
+  denies: number | null;
+  gold_per_min: number | null;
+  xp_per_min: number | null;
+  net_worth: number | null;
+  hero_damage: number | null;
+  tower_damage: number | null;
+  hero_healing: number | null;
+  obs_placed: number | null;
+  sen_placed: number | null;
+  items: ItemRef[];
+  backpack: ItemRef[];
+  neutral_item: ItemRef | null;
+}
+
+export interface MatchFull {
+  match_id: number;
+  start_time: string;
+  duration_seconds: number;
+  radiant_win: boolean | null;
+  is_parsed: boolean;
+  radiant_score: number;
+  dire_score: number;
+  players: ScoreboardPlayer[];
+  radiant_gold_adv: number[];
+  radiant_xp_adv: number[];
+}
+
 export interface MatchSlot {
   player_slot: number;
   is_radiant: boolean;

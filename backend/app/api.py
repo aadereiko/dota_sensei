@@ -15,11 +15,14 @@ from app.models import Hero, Insight, Item, Match, MatchPlayer, Player
 from app.schemas import (
     HeroOut,
     ItemOut,
+    ItemRefOut,
     MatchDetailOut,
+    MatchFullOut,
     MatchImportRequest,
     MatchImportResult,
     MatchSummaryOut,
     PlayerOut,
+    ScoreboardPlayerOut,
     SyncRequest,
     SyncResult,
 )
@@ -132,6 +135,97 @@ async def import_match_by_id(
         if exc.response.status_code == 404:
             raise HTTPException(404, f"OpenDota has no match {payload.match_id}") from exc
         raise HTTPException(502, f"OpenDota error: {exc.response.status_code}") from exc
+
+
+@router.get("/matches/{match_id}", response_model=MatchFullOut)
+async def get_full_match(match_id: int, session: SessionDep) -> MatchFullOut:
+    """The whole match: both teams, inventories, and the advantage series.
+
+    Reads only what's already ingested — import the match first.
+    """
+    match = await session.get(Match, match_id)
+    if match is None:
+        raise HTTPException(404, "match not ingested — POST /api/matches/import first")
+
+    rows = (
+        (
+            await session.execute(
+                select(MatchPlayer)
+                .where(MatchPlayer.match_id == match_id)
+                .options(selectinload(MatchPlayer.hero))
+                .order_by(MatchPlayer.player_slot)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    # One lookup for every item id in the match rather than a query per slot.
+    wanted: set[int] = set()
+    for row in rows:
+        wanted.update(i for i in (row.items or []) if i)
+        wanted.update(i for i in (row.backpack or []) if i)
+        if row.item_neutral:
+            wanted.add(row.item_neutral)
+    items: dict[int, Item] = {}
+    if wanted:
+        found = (
+            (await session.execute(select(Item).where(Item.id.in_(wanted)))).scalars().all()
+        )
+        items = {i.id: i for i in found}
+
+    def ref(item_id: int | None) -> ItemRefOut | None:
+        item = items.get(item_id or 0)
+        if item is None:
+            return None
+        return ItemRefOut(
+            id=item.id, name=item.localized_name, image_url=cdn_image_url(item.img)
+        )
+
+    def refs(ids: list[int] | None) -> list[ItemRefOut]:
+        return [r for r in (ref(i) for i in (ids or []) if i) if r is not None]
+
+    players = [
+        ScoreboardPlayerOut(
+            player_slot=row.player_slot,
+            is_radiant=row.is_radiant,
+            account_id=row.account_id,
+            hero_id=row.hero_id,
+            hero_name=row.hero.localized_name if row.hero else None,
+            hero_icon_url=cdn_image_url(row.hero.icon) if row.hero else None,
+            level=row.level,
+            kills=row.kills,
+            deaths=row.deaths,
+            assists=row.assists,
+            last_hits=row.last_hits,
+            denies=row.denies,
+            gold_per_min=row.gold_per_min,
+            xp_per_min=row.xp_per_min,
+            net_worth=row.net_worth,
+            hero_damage=row.hero_damage,
+            tower_damage=row.tower_damage,
+            hero_healing=row.hero_healing,
+            obs_placed=row.obs_placed,
+            sen_placed=row.sen_placed,
+            items=refs(row.items),
+            backpack=refs(row.backpack),
+            neutral_item=ref(row.item_neutral),
+        )
+        for row in rows
+    ]
+
+    return MatchFullOut(
+        match_id=match.match_id,
+        start_time=match.start_time,
+        duration_seconds=match.duration_seconds,
+        radiant_win=match.radiant_win,
+        is_parsed=match.is_parsed,
+        radiant_score=sum(p.kills or 0 for p in players if p.is_radiant),
+        dire_score=sum(p.kills or 0 for p in players if not p.is_radiant),
+        players=players,
+        radiant_gold_adv=match.radiant_gold_adv or [],
+        radiant_xp_adv=match.radiant_xp_adv or [],
+    )
 
 
 @router.get("/players/{account_id}", response_model=PlayerOut)

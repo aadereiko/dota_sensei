@@ -7,6 +7,7 @@ import App from "@/App";
 import { Layout } from "@/components/Layout";
 import HeroesPage from "@/pages/HeroesPage";
 import ItemsPage from "@/pages/ItemsPage";
+import MatchPage from "@/pages/MatchPage";
 import "@/index.css";
 
 const queryClient = new QueryClient({
@@ -27,6 +28,7 @@ createRoot(container).render(
             <Route index element={<App />} />
             <Route path="heroes" element={<HeroesPage />} />
             <Route path="items" element={<ItemsPage />} />
+            <Route path="matches/:matchId" element={<MatchPage />} />
             {/* Steam bounces back to /?login=… which the index route handles. */}
             <Route path="*" element={<App />} />
           </Route>

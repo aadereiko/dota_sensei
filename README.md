@@ -181,6 +181,27 @@ then behaves like any other — it shows up in your match list and feeds the
 recurring-mistakes rollup. Claiming a slot that already belongs to a different
 identified account is refused with a 409.
 
+### The match page
+
+`/matches/:matchId` shows the whole game: both teams' scoreboards with levels,
+K/D/A, last hits, GPM, net worth and hero damage; every player's six item slots,
+backpack and neutral item as icons; and per-minute gold and experience advantage
+graphs. Inventories come from the summary data, so they work on **unparsed**
+matches — only the graphs need a parsed replay.
+
+Three deliberate choices in the charts:
+
+- **Gold and XP are separate charts, never one plot with two y-axes.** Two scales
+  on one plot invent a correlation the data doesn't contain.
+- **Radiant is blue, not the traditional green.** Green vs red measures ΔE 7.0
+  under deuteranopia on this surface — inside the fail band. Blue vs red measures
+  19.2. Position above/below the baseline carries the meaning regardless, so hue
+  is redundant encoding rather than the only channel.
+- **The domain fits the data but always includes zero**, with a minimum span so a
+  game that stayed within a few hundred gold isn't stretched into a fake mountain
+  range. A symmetric domain wasted half the canvas on the one-sided games that
+  most matches actually are.
+
 ### Layout
 
 ```
@@ -233,7 +254,8 @@ the box; a production static host needs it configured.
 | POST | `/api/matches/import` | analyse one match by id (works without public history) |
 | GET | `/api/players/{id}` | profile |
 | GET | `/api/players/{id}/matches` | match list with insight counts |
-| GET | `/api/players/{id}/matches/{match_id}` | full breakdown + insights |
+| GET | `/api/matches/{match_id}` | full scoreboard: both teams, inventories, graphs |
+| GET | `/api/players/{id}/matches/{match_id}` | your line in a match + insights |
 | GET | `/api/players/{id}/insights/recurring` | mistakes ranked by frequency |
 
 ## Getting started

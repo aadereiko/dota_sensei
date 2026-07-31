@@ -22,6 +22,7 @@ from app.analysis import evaluate_all
 from app.models import Hero, Insight, Match, MatchPlayer, Player
 from app.schemas import MatchImportResult, MatchSlotOut, SyncResult
 from app.services.heroes import ensure_heroes, hero_image_url, hero_map
+from app.services.items import ensure_items
 from app.services.opendota import OpenDotaClient
 
 
@@ -83,6 +84,11 @@ def _match_player_values(raw: dict[str, Any], match: dict[str, Any]) -> dict[str
         "sen_placed": raw.get("sen_placed"),
         "camps_stacked": raw.get("camps_stacked"),
         "stuns_seconds": raw.get("stuns"),
+        "level": raw.get("level"),
+        # 0 is an empty slot, not item id 0 — kept as-is and filtered on read.
+        "items": [raw.get(f"item_{i}") or 0 for i in range(6)],
+        "backpack": [raw.get(f"backpack_{i}") or 0 for i in range(3)],
+        "item_neutral": raw.get("item_neutral"),
         "timeline": {
             "gold_t": raw.get("gold_t"),
             "xp_t": raw.get("xp_t"),
@@ -109,6 +115,8 @@ async def ingest_match(session: AsyncSession, match: dict[str, Any]) -> list[Mat
         "detail_fetched": True,
         # OpenDota sets `version` only on parsed replays.
         "is_parsed": match.get("version") is not None,
+        "radiant_gold_adv": match.get("radiant_gold_adv"),
+        "radiant_xp_adv": match.get("radiant_xp_adv"),
     }
     await session.execute(
         pg_insert(Match)
@@ -206,7 +214,9 @@ async def import_match(
     itself is public even when the player in it is anonymous, so pasting a match
     id from the Dota client still gets you a breakdown.
     """
+    # Both caches, so hero names and inventories resolve on first use.
     await ensure_heroes(session, client)
+    await ensure_items(session, client)
     async with client or OpenDotaClient() as api:
         detail = await api.match(match_id)
 
@@ -275,7 +285,9 @@ async def sync_player(
     limit: int = 20,
     client: OpenDotaClient | None = None,
 ) -> SyncResult:
+    # Both caches, so hero names and inventories resolve on first use.
     await ensure_heroes(session, client)
+    await ensure_items(session, client)
     async with client or OpenDotaClient() as api:
         await upsert_player(session, account_id, await api.player(account_id))
         recent = await api.recent_matches(account_id, limit=limit)

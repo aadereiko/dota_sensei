@@ -5,6 +5,7 @@ import type {
   Hero,
   Item,
   MatchDetail,
+  MatchFull,
   MatchImportResult,
   MatchSummary,
   Player,
@@ -50,6 +51,9 @@ export const api = {
 
   matches: (accountId: number, limit = 20) =>
     request<MatchSummary[]>(`/players/${accountId}/matches?limit=${limit}`),
+
+  /** The whole match: both teams, inventories, advantage series. */
+  fullMatch: (matchId: number) => request<MatchFull>(`/matches/${matchId}`),
 
   match: (accountId: number, matchId: number) =>
     request<MatchDetail>(`/players/${accountId}/matches/${matchId}`),

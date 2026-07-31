@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { api, UnauthorizedError } from "@/api";
 import { ImportMatch } from "@/components/ImportMatch";
@@ -203,8 +204,16 @@ export default function App() {
           </section>
 
           <section>
-            <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <h2 className="mb-3 flex items-baseline justify-between gap-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
               Breakdown
+              {selectedMatchId !== null && (
+                <Link
+                  to={`/matches/${selectedMatchId}?account=${accountId}`}
+                  className="font-normal normal-case tracking-normal text-slate-400 underline hover:text-slate-200"
+                >
+                  Full match details →
+                </Link>
+              )}
             </h2>
             {selectedMatchId === null ? (
               <p className="text-sm text-slate-500">Pick a match on the left.</p>

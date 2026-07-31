@@ -104,6 +104,58 @@ class SyncRequest(BaseModel):
     limit: int = 20
 
 
+class ItemRefOut(BaseModel):
+    """An item in an inventory slot, already resolved for display."""
+
+    id: int
+    name: str
+    image_url: str | None
+
+
+class ScoreboardPlayerOut(BaseModel):
+    """One player's full line in the match scoreboard."""
+
+    player_slot: int
+    is_radiant: bool
+    account_id: int | None
+    hero_id: int
+    hero_name: str | None
+    hero_icon_url: str | None
+    level: int | None
+    kills: int | None
+    deaths: int | None
+    assists: int | None
+    last_hits: int | None
+    denies: int | None
+    gold_per_min: int | None
+    xp_per_min: int | None
+    net_worth: int | None
+    hero_damage: int | None
+    tower_damage: int | None
+    hero_healing: int | None
+    obs_placed: int | None
+    sen_placed: int | None
+    items: list[ItemRefOut] = []
+    backpack: list[ItemRefOut] = []
+    neutral_item: ItemRefOut | None = None
+
+
+class MatchFullOut(BaseModel):
+    """Everything about one match: both teams, inventories, and the graphs."""
+
+    match_id: int
+    start_time: datetime
+    duration_seconds: int
+    radiant_win: bool | None
+    is_parsed: bool
+    radiant_score: int
+    dire_score: int
+    players: list[ScoreboardPlayerOut]
+    # Per-minute radiant-minus-dire. Empty on unparsed matches.
+    radiant_gold_adv: list[int] = []
+    radiant_xp_adv: list[int] = []
+
+
 class MatchImportRequest(BaseModel):
     """Analyse one match by id, for people whose history isn't public.
 
