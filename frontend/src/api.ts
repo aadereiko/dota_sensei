@@ -1,6 +1,7 @@
 // All requests go to /api and are proxied to the backend on 8273 by Vite.
 
 import type {
+  CurrentUser,
   MatchDetail,
   MatchSummary,
   Player,
@@ -8,11 +9,17 @@ import type {
   SyncResult,
 } from "@/types";
 
+/** Thrown for 401s so callers can tell "signed out" from a real failure. */
+export class UnauthorizedError extends Error {}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
     headers: { "Content-Type": "application/json" },
+    // Send the session cookie.
+    credentials: "same-origin",
     ...init,
   });
+  if (response.status === 401) throw new UnauthorizedError("not signed in");
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`${response.status} ${response.statusText}: ${body}`);
@@ -20,10 +27,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/** Full-page navigation, not fetch — Steam has to render its own login page. */
+export const STEAM_LOGIN_URL = "/api/auth/steam/login";
+
 export const api = {
   health: () => request<{ status: string; database: string }>("/health"),
 
   config: () => request<{ default_account_id: number | null }>("/config"),
+
+  me: () => request<CurrentUser>("/auth/me"),
+
+  logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
 
   player: (accountId: number) => request<Player>(`/players/${accountId}`),
 
@@ -36,7 +50,8 @@ export const api = {
   recurring: (accountId: number) =>
     request<RecurringMistake[]>(`/players/${accountId}/insights/recurring`),
 
-  sync: (accountId: number, limit = 20) =>
+  /** Omit accountId to sync whoever is signed in. */
+  sync: (accountId: number | null, limit = 20) =>
     request<SyncResult>("/sync", {
       method: "POST",
       body: JSON.stringify({ account_id: accountId, limit }),

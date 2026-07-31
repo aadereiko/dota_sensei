@@ -7,6 +7,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.auth import OptionalAccount
 from app.config import Settings, get_settings
 from app.db import get_session
 from app.models import Insight, Match, MatchPlayer, Player
@@ -40,11 +41,19 @@ async def client_config(settings: SettingsDep) -> dict[str, int | None]:
 
 
 @router.post("/sync", response_model=SyncResult)
-async def sync(payload: SyncRequest, session: SessionDep) -> SyncResult:
-    """Pull recent matches from OpenDota and re-run the analysis over them."""
+async def sync(
+    payload: SyncRequest, session: SessionDep, signed_in: OptionalAccount
+) -> SyncResult:
+    """Pull recent matches from OpenDota and re-run the analysis over them.
+
+    Defaults to the signed-in account, so the UI doesn't have to know the id.
+    """
     if payload.limit < 1 or payload.limit > 100:
         raise HTTPException(422, "limit must be between 1 and 100")
-    return await sync_player(session, payload.account_id, payload.limit)
+    account_id = payload.account_id or signed_in
+    if account_id is None:
+        raise HTTPException(400, "sign in with Steam or pass an account_id")
+    return await sync_player(session, account_id, payload.limit)
 
 
 @router.get("/players/{account_id}", response_model=PlayerOut)

@@ -21,6 +21,15 @@ class PlayerOut(ORMModel):
     last_synced_at: datetime | None
 
 
+class CurrentUser(BaseModel):
+    account_id: int
+    # A JS number can't hold a 17-digit SteamID64 exactly, so send it as a string.
+    steam_id64: str
+    persona_name: str | None
+    avatar_url: str | None
+    last_synced_at: datetime | None
+
+
 class InsightOut(ORMModel):
     rule_key: str
     severity: Severity
@@ -62,7 +71,8 @@ class MatchDetailOut(MatchSummaryOut):
 
 
 class SyncRequest(BaseModel):
-    account_id: int
+    # Optional: defaults to the signed-in account.
+    account_id: int | None = None
     # How many recent matches to pull detail for. Detail is one API call each,
     # so keep it small while iterating.
     limit: int = 20

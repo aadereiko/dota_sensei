@@ -90,6 +90,44 @@ gate — OpenDota's benchmarks are per-hero and so already role-normalised.
 `OpenDotaClient.request_parse()` asks for a parse; wiring it into the sync flow is
 the obvious next step.
 
+### Steam sign-in
+
+Steam is an OpenID 2.0 *provider*, so there's no app to register and **no API key
+to obtain** — you redirect to Steam, the user comes back with signed parameters,
+and you ask Steam to confirm the signature:
+
+```
+browser → /api/auth/steam/login → steamcommunity.com → /api/auth/steam/callback
+                                                              ↓
+                                           POST back to Steam: check_authentication
+                                                              ↓
+                                        is_valid:true → session cookie → /?login=ok
+```
+
+All Steam returns is a SteamID64; `account_id` is its low 32 bits
+(`steamid64 - 76561197960265728`), which is exactly what OpenDota wants. The
+profile name and avatar come from OpenDota on first sign-in.
+
+Two things that are easy to get wrong and are handled here:
+
+- **`claimed_id` must be inside `openid.signed`.** A response can carry a
+  perfectly valid signature that simply doesn't cover the identity fields, letting
+  an attacker swap in any SteamID. `verify_callback` rejects those, and there's a
+  test for exactly that case.
+- **The callback and the app must share an origin.** A cookie set on
+  `127.0.0.1:8273` is not sent by `localhost:5273` — different hosts. So
+  `PUBLIC_BASE_URL` points at the Vite server, and the callback arrives through
+  its `/api` proxy. Set it to your real origin in production.
+
+The session is a signed (not encrypted) cookie holding only `account_id`, which
+is public information anyway. `SameSite=Lax` is required rather than `Strict`,
+since the Steam callback is a top-level cross-site redirect. Set
+`DOTA_SENSEI_SECRET_KEY` to something real before deploying — the default is a
+placeholder, and changing it signs everyone out.
+
+Once signed in, `POST /api/sync` needs no body: the server reads the account from
+the session. You can still pass an explicit `account_id` to look at anyone else.
+
 ### Layout
 
 ```
@@ -123,6 +161,10 @@ frontend/
 | --- | --- | --- |
 | GET | `/api/health` | liveness + DB check |
 | GET | `/api/config` | default account id for the UI |
+| GET | `/api/auth/steam/login` | 302 to Steam |
+| GET | `/api/auth/steam/callback` | verify, start session, 302 back to the app |
+| GET | `/api/auth/me` | signed-in user (401 if not) |
+| POST | `/api/auth/logout` | clear the session |
 | POST | `/api/sync` | pull recent matches, run analysis |
 | GET | `/api/players/{id}` | profile |
 | GET | `/api/players/{id}/matches` | match list with insight counts |
@@ -139,9 +181,9 @@ make backend    # API on 8273
 make frontend   # UI on 5273
 ```
 
-Then open http://localhost:5273 and enter your account id (the number in your
-Dotabuff / OpenDota profile URL), or set `DOTA_SENSEI_DEFAULT_ACCOUNT_ID` in
-`.env` to have it preloaded.
+Then open http://localhost:5273 and **Sign in through Steam** — that's all the
+setup there is; Steam OpenID needs no key or app registration. You can also paste
+any account id to look at someone else's games without signing in.
 
 An OpenDota API key is optional — without one you get 2000 calls/day at 60/min,
 and each match detail is one call.
@@ -152,6 +194,12 @@ Architecture + working skeleton. Verified end to end against real Postgres and
 the live OpenDota API: sync ingests real matches, the rules fire and persist,
 re-running is idempotent, and the Vite proxy reaches the API. Backend tests and
 ruff pass; the frontend typechecks and builds.
+
+Steam sign-in works end to end at the protocol level: the login redirect carries
+the right OpenID parameters, a forged callback is rejected by Steam's own
+`check_authentication` and sets no cookie, a valid session resolves to the right
+account, a tampered cookie 401s, and logout clears it. The one step not exercised
+automatically is a human clicking through Steam's login page.
 
 Next up:
 

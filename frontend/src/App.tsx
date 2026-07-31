@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import { api } from "@/api";
+import { api, UnauthorizedError } from "@/api";
 import { InsightCard } from "@/components/InsightCard";
 import { MatchRow } from "@/components/MatchRow";
+import { SignedInAs, SteamLoginButton } from "@/components/SteamAuth";
 
 export default function App() {
   const queryClient = useQueryClient();
@@ -11,14 +12,34 @@ export default function App() {
   const [accountId, setAccountId] = useState<number | null>(null);
   const [selectedMatchId, setSelectedMatchId] = useState<number | null>(null);
 
-  // Preload the owner's account if DOTA_SENSEI_DEFAULT_ACCOUNT_ID is set.
+  // Steam bounces back to /?login=ok|failed after the OpenID round trip.
+  const loginStatus = new URLSearchParams(window.location.search).get("login");
+  useEffect(() => {
+    if (loginStatus) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [loginStatus]);
+
+  const me = useQuery({
+    queryKey: ["me"],
+    queryFn: api.me,
+    // A 401 just means signed out — don't retry it.
+    retry: (count, error) => !(error instanceof UnauthorizedError) && count < 1,
+  });
+  const signedIn = me.data ?? null;
+
+  // Signed in? That's the account we look at, unless one was typed in manually.
   const { data: config } = useQuery({ queryKey: ["config"], queryFn: api.config });
   useEffect(() => {
-    if (config?.default_account_id && accountId === null) {
-      setAccountId(config.default_account_id);
-      setAccountInput(String(config.default_account_id));
+    if (accountId !== null) return;
+    const preset = signedIn?.account_id ?? config?.default_account_id ?? null;
+    if (preset !== null) {
+      setAccountId(preset);
+      setAccountInput(String(preset));
     }
-  }, [config, accountId]);
+  }, [signedIn, config, accountId]);
+
+  const viewingSelf = signedIn !== null && signedIn.account_id === accountId;
 
   const matches = useQuery({
     queryKey: ["matches", accountId],
@@ -39,10 +60,21 @@ export default function App() {
   });
 
   const sync = useMutation({
-    mutationFn: () => api.sync(accountId!),
+    // Signed in and looking at yourself? Let the server use the session.
+    mutationFn: () => api.sync(viewingSelf ? null : accountId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["matches", accountId] });
       queryClient.invalidateQueries({ queryKey: ["recurring", accountId] });
+    },
+  });
+
+  const signOut = useMutation({
+    mutationFn: api.logout,
+    onSuccess: () => {
+      setAccountId(null);
+      setAccountInput("");
+      setSelectedMatchId(null);
+      queryClient.clear();
     },
   });
 
@@ -55,52 +87,74 @@ export default function App() {
             Your last games, and what went wrong in them.
           </p>
         </div>
-        <form
-          className="flex gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const parsed = Number.parseInt(accountInput, 10);
-            if (Number.isFinite(parsed)) {
-              setAccountId(parsed);
-              setSelectedMatchId(null);
-            }
-          }}
-        >
-          <input
-            value={accountInput}
-            onChange={(event) => setAccountInput(event.target.value)}
-            placeholder="Dota account id"
-            inputMode="numeric"
-            className="w-44 rounded-md border border-border-subtle bg-surface-raised px-3 py-1.5 text-sm placeholder:text-slate-500 focus:border-slate-400 focus:outline-none"
-          />
-          <button
-            type="submit"
-            className="rounded-md border border-border-subtle px-3 py-1.5 text-sm hover:bg-surface-raised"
-          >
-            Load
-          </button>
+
+        <div className="flex flex-wrap items-center gap-3">
+          {me.isLoading ? null : signedIn ? (
+            <SignedInAs user={signedIn} onSignOut={() => signOut.mutate()} />
+          ) : (
+            <SteamLoginButton />
+          )}
           <button
             type="button"
             disabled={accountId === null || sync.isPending}
             onClick={() => sync.mutate()}
-            className="rounded-md bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-900 disabled:opacity-40"
+            className="rounded-md border border-border-subtle px-3 py-1.5 text-sm hover:bg-surface-raised disabled:opacity-40"
           >
             {sync.isPending ? "Syncing…" : "Sync"}
           </button>
-        </form>
+        </div>
       </header>
 
+      {loginStatus === "failed" && (
+        <p className="mt-4 text-sm text-loss">
+          Steam sign-in didn&apos;t complete. Try again.
+        </p>
+      )}
       {sync.isError && (
         <p className="mt-4 text-sm text-loss">Sync failed: {String(sync.error)}</p>
       )}
 
       {accountId === null ? (
-        <p className="mt-10 text-sm text-slate-400">
-          Enter your account id — the number in your Dotabuff or OpenDota profile URL.
-        </p>
+        <div className="mt-10 space-y-4">
+          <p className="text-sm text-slate-400">
+            Sign in through Steam to analyse your own matches.
+          </p>
+          <SteamLoginButton />
+          <form
+            className="flex gap-2 pt-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const parsed = Number.parseInt(accountInput, 10);
+              if (Number.isFinite(parsed)) {
+                setAccountId(parsed);
+                setSelectedMatchId(null);
+              }
+            }}
+          >
+            <input
+              value={accountInput}
+              onChange={(event) => setAccountInput(event.target.value)}
+              placeholder="…or paste any account id"
+              inputMode="numeric"
+              className="w-56 rounded-md border border-border-subtle bg-surface-raised px-3 py-1.5 text-sm placeholder:text-slate-500 focus:border-slate-400 focus:outline-none"
+            />
+            <button
+              type="submit"
+              className="rounded-md border border-border-subtle px-3 py-1.5 text-sm hover:bg-surface-raised"
+            >
+              Load
+            </button>
+          </form>
+        </div>
       ) : (
         <div className="mt-8 grid gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
           <section>
+            {!viewingSelf && (
+              <p className="mb-4 text-xs text-slate-500">
+                Viewing account <span className="font-mono">{accountId}</span>
+              </p>
+            )}
+
             <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
               Recurring mistakes
             </h2>

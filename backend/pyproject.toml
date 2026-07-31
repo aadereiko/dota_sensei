@@ -12,6 +12,8 @@ dependencies = [
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
     "httpx>=0.28",
+    # Signs the session cookie for starlette's SessionMiddleware.
+    "itsdangerous>=2.2",
 ]
 
 [project.optional-dependencies]

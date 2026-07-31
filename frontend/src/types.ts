@@ -43,6 +43,15 @@ export interface MatchDetail extends MatchSummary {
   insights: Insight[];
 }
 
+export interface CurrentUser {
+  account_id: number;
+  /** 17 digits — a string because it exceeds Number.MAX_SAFE_INTEGER. */
+  steam_id64: string;
+  persona_name: string | null;
+  avatar_url: string | null;
+  last_synced_at: string | null;
+}
+
 export interface Player {
   account_id: number;
   persona_name: string | null;
