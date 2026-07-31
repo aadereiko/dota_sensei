@@ -89,6 +89,14 @@ def _match_player_values(raw: dict[str, Any], match: dict[str, Any]) -> dict[str
         "items": [raw.get(f"item_{i}") or 0 for i in range(6)],
         "backpack": [raw.get(f"backpack_{i}") or 0 for i in range(3)],
         "item_neutral": raw.get("item_neutral"),
+        "lane_efficiency_pct": raw.get("lane_efficiency_pct"),
+        "teamfight_participation": raw.get("teamfight_participation"),
+        "actions_per_min": raw.get("actions_per_min"),
+        "neutral_kills": raw.get("neutral_kills"),
+        "tower_kills": raw.get("tower_kills"),
+        "roshan_kills": raw.get("roshan_kills"),
+        "buyback_count": raw.get("buyback_count"),
+        "pings": raw.get("pings"),
         "timeline": {
             "gold_t": raw.get("gold_t"),
             "xp_t": raw.get("xp_t"),
@@ -117,6 +125,11 @@ async def ingest_match(session: AsyncSession, match: dict[str, Any]) -> list[Mat
         "is_parsed": match.get("version") is not None,
         "radiant_gold_adv": match.get("radiant_gold_adv"),
         "radiant_xp_adv": match.get("radiant_xp_adv"),
+        "objectives": match.get("objectives"),
+        "teamfight_count": len(match.get("teamfights") or []) or None,
+        "first_blood_time": match.get("first_blood_time"),
+        "comeback": match.get("comeback"),
+        "stomp": match.get("stomp"),
     }
     await session.execute(
         pg_insert(Match)
@@ -170,6 +183,44 @@ async def analyse_performance(session: AsyncSession, performance: MatchPlayer) -
             )
         )
     return len(findings)
+
+
+async def request_parse(
+    session: AsyncSession, match_id: int, client: OpenDotaClient | None = None
+) -> int | None:
+    """Ask OpenDota to parse this match's replay. Returns the job id."""
+    async with client or OpenDotaClient() as api:
+        job_id = await api.request_parse(match_id)
+    match = await session.get(Match, match_id)
+    if match is not None and job_id is not None:
+        match.parse_job_id = job_id
+        await session.flush()
+    return job_id
+
+
+async def poll_parse(
+    session: AsyncSession, match_id: int, job_id: int, client: OpenDotaClient | None = None
+) -> bool:
+    """Check a queued parse; when it's finished, re-ingest and re-analyse.
+
+    Returns True once the match is parsed. A finished job doesn't guarantee a
+    parsed match — the replay can be unavailable — so the re-fetch is what
+    settles it.
+    """
+    async with client or OpenDotaClient() as api:
+        if not await api.parse_job_status(job_id):
+            return False
+        detail = await api.match(match_id)
+
+    performances = await ingest_match(session, detail)
+    # Re-run the rules: a parse unlocks lane_role and the timeline, so findings
+    # that couldn't fire before may fire now.
+    for performance in performances:
+        if performance.account_id is not None:
+            await session.refresh(performance, ["match", "hero"])
+            await analyse_performance(session, performance)
+    await session.flush()
+    return detail.get("version") is not None
 
 
 def _hero_name(heroes: dict[int, Hero], hero_id: int | None) -> str | None:

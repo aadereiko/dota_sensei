@@ -138,6 +138,22 @@ class Match(Base):
     # Parsed matches only; empty otherwise.
     radiant_gold_adv: Mapped[list[int] | None] = mapped_column(JSONB)
     radiant_xp_adv: Mapped[list[int] | None] = mapped_column(JSONB)
+
+    # --- Parsed-replay extras ---
+    # Raw objective log (towers, roshan, first blood, aegis). Turned into
+    # readable events on read rather than at ingest, so the mapping can change
+    # without a re-ingest.
+    objectives: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    teamfight_count: Mapped[int | None] = mapped_column(Integer)
+    first_blood_time: Mapped[int | None] = mapped_column(Integer)
+    # Gold amounts, NOT booleans: `stomp` is the winner's peak lead and
+    # `comeback` the largest deficit they came back from. Nearly every match has
+    # non-zero values, so treating them as flags labels everything a stomp.
+    comeback: Mapped[int | None] = mapped_column(Integer)
+    stomp: Mapped[int | None] = mapped_column(Integer)
+
+    # Set when we've asked OpenDota to parse the replay, so the UI can poll.
+    parse_job_id: Mapped[int | None] = mapped_column(BigInteger)
     raw: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     players: Mapped[list["MatchPlayer"]] = relationship(
@@ -194,6 +210,17 @@ class MatchPlayer(Base):
     items: Mapped[list[int] | None] = mapped_column(JSONB)
     backpack: Mapped[list[int] | None] = mapped_column(JSONB)
     item_neutral: Mapped[int | None] = mapped_column(Integer)
+
+    # --- Parsed-replay extras ---
+    # How much of the lane's available gold+xp you actually took, 0-100.
+    lane_efficiency_pct: Mapped[int | None] = mapped_column(Integer)
+    teamfight_participation: Mapped[float | None] = mapped_column(Float)
+    actions_per_min: Mapped[int | None] = mapped_column(Integer)
+    neutral_kills: Mapped[int | None] = mapped_column(Integer)
+    tower_kills: Mapped[int | None] = mapped_column(Integer)
+    roshan_kills: Mapped[int | None] = mapped_column(Integer)
+    buyback_count: Mapped[int | None] = mapped_column(Integer)
+    pings: Mapped[int | None] = mapped_column(Integer)
 
     # --- Series & derived blobs (only present once detail is fetched) ---
     # gold_t / xp_t / lh_t per-minute arrays, purchase_log, kills_log, etc.

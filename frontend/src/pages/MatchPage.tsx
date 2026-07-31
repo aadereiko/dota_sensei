@@ -5,7 +5,13 @@ import { api } from "@/api";
 import { AdvantageChart } from "@/components/AdvantageChart";
 import { InsightCard } from "@/components/InsightCard";
 import { PageHeader } from "@/components/Layout";
+import { MatchTimeline } from "@/components/MatchTimeline";
+import { RequestParse } from "@/components/RequestParse";
 import { Scoreboard } from "@/components/Scoreboard";
+
+function gold(value: number): string {
+  return value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value);
+}
 
 export default function MatchPage() {
   const { matchId } = useParams();
@@ -94,12 +100,36 @@ export default function MatchPage() {
             <AdvantageChart title="Net experience advantage" series={m.radiant_xp_adv} />
           </div>
         ) : (
-          <p className="rounded-lg border border-border-subtle bg-surface-raised p-4 text-sm text-slate-500">
-            OpenDota hasn&apos;t parsed this replay, so there are no per-minute graphs.
-            The scoreboard above comes from the summary data, which is always available.
-          </p>
+          <div className="space-y-3 rounded-lg border border-border-subtle bg-surface-raised p-4">
+            <p className="text-sm text-slate-400">
+              OpenDota hasn&apos;t parsed this replay, so there are no per-minute
+              graphs, item timings, lane stats or objective log. The scoreboard above
+              comes from summary data, which is always available.
+            </p>
+            <p className="text-sm text-slate-500">
+              You can ask for a parse — it&apos;s free, and it also lets the analysis
+              rules that need lane roles run on this game.
+            </p>
+            <RequestParse matchId={m.match_id} />
+          </div>
         )}
       </section>
+
+      {m.events.length > 0 && (
+        <section className="mt-8">
+          <h2 className="mb-3 flex items-baseline gap-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Key moments
+            <span className="font-normal normal-case tracking-normal text-slate-500">
+              {/* stomp/comeback are gold amounts, not flags — rendering them as
+                  badges would call every game a stomp. */}
+              {m.teamfight_count !== null && `${m.teamfight_count} teamfights`}
+              {m.stomp ? ` · winner led by up to ${gold(m.stomp)}` : ""}
+              {m.comeback ? ` · came back from ${gold(m.comeback)} down` : ""}
+            </span>
+          </h2>
+          <MatchTimeline events={m.events} />
+        </section>
+      )}
 
       <div className="mt-8">
         <Link to="/" className="text-sm text-slate-400 underline hover:text-slate-200">

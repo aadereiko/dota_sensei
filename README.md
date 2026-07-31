@@ -108,9 +108,17 @@ Carry and Support resolve to `None` rather than being guessed at, and
 unparsed Rubick game from two findings to three, and swapped "check your jungle
 route" for advice a support can actually use.
 
-`matches.is_parsed` is still stored and surfaced, since the timeline-based rules
-genuinely need a parse. `OpenDotaClient.request_parse()` asks for one; wiring it
-into the sync flow is the obvious next step.
+**Forcing a parse.** You don't have to wait for one. `POST /api/matches/{id}/parse`
+queues a parse with OpenDota — free, no key, no rate cost beyond the request —
+and returns a job id. `GET /api/matches/{id}/parse/{job_id}` polls it, and once
+the job lands it re-fetches the match, re-ingests it, and **re-runs the analysis**,
+since a parse unlocks `lane_role` and the timeline and can make rules fire that
+previously couldn't. The match page shows a "Request parse" button on any
+unparsed game and polls in the background.
+
+One wrinkle worth knowing: a finished job doesn't guarantee a parsed match — the
+replay can simply be unavailable, especially for older games. So the poll treats
+the re-fetched match as the source of truth, not the job status.
 
 ### Steam sign-in
 
@@ -183,11 +191,26 @@ identified account is refused with a 409.
 
 ### The match page
 
-`/matches/:matchId` shows the whole game: both teams' scoreboards with levels,
-K/D/A, last hits, GPM, net worth and hero damage; every player's six item slots,
-backpack and neutral item as icons; and per-minute gold and experience advantage
-graphs. Inventories come from the summary data, so they work on **unparsed**
-matches — only the graphs need a parsed replay.
+`/matches/:matchId` shows the whole game:
+
+- **Scoreboard** — both teams with levels, K/D/A, last hits, GPM, net worth, hero
+  damage, and every player's six item slots, backpack and neutral item as icons.
+- **Per-player detail** (click a hero) — lane efficiency, teamfight participation,
+  APM, neutral kills, towers, buybacks, wards, and **item timings**: when each
+  build item was actually bought.
+- **Graphs** — per-minute gold and experience advantage.
+- **Key moments** — first blood, every tower and barracks with the team credited,
+  Roshan, aegis pickups, and the ancient falling.
+
+Inventories and the scoreboard come from summary data, so they work on
+**unparsed** matches. Everything else needs a parsed replay — hence the button.
+
+Item timings filter the purchase log, which otherwise runs to ~40 entries of
+tangoes and branches. The heuristic keeps anything `created` (built from
+components) plus any non-consumable over 2000 gold — because `created` alone
+misses Blink Dagger, which is bought outright and which OpenDota even tags as a
+"component". The cost floor occasionally lets a raw Demon Edge through; that's
+the accepted trade.
 
 Three deliberate choices in the charts:
 
@@ -255,6 +278,8 @@ the box; a production static host needs it configured.
 | GET | `/api/players/{id}` | profile |
 | GET | `/api/players/{id}/matches` | match list with insight counts |
 | GET | `/api/matches/{match_id}` | full scoreboard: both teams, inventories, graphs |
+| POST | `/api/matches/{match_id}/parse` | ask OpenDota to parse the replay |
+| GET | `/api/matches/{match_id}/parse/{job_id}` | poll it; re-ingests when it lands |
 | GET | `/api/players/{id}/matches/{match_id}` | your line in a match + insights |
 | GET | `/api/players/{id}/insights/recurring` | mistakes ranked by frequency |
 

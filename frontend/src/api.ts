@@ -7,6 +7,7 @@ import type {
   MatchDetail,
   MatchFull,
   MatchImportResult,
+  ParseStatus,
   MatchSummary,
   Player,
   RecurringMistake,
@@ -51,6 +52,12 @@ export const api = {
 
   matches: (accountId: number, limit = 20) =>
     request<MatchSummary[]>(`/players/${accountId}/matches?limit=${limit}`),
+
+  requestParse: (matchId: number) =>
+    request<ParseStatus>(`/matches/${matchId}/parse`, { method: "POST" }),
+
+  checkParse: (matchId: number, jobId: number) =>
+    request<ParseStatus>(`/matches/${matchId}/parse/${jobId}`),
 
   /** The whole match: both teams, inventories, advantage series. */
   fullMatch: (matchId: number) => request<MatchFull>(`/matches/${matchId}`),

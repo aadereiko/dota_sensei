@@ -112,6 +112,21 @@ class ItemRefOut(BaseModel):
     image_url: str | None
 
 
+class PurchaseOut(BaseModel):
+    """When an item was bought, in seconds from horn (negative = pre-game)."""
+
+    time: int
+    name: str
+    image_url: str | None
+
+
+class MatchEventOut(BaseModel):
+    time: int
+    kind: str  # first_blood | building | throne | roshan | aegis
+    team: str | None  # radiant | dire
+    label: str
+
+
 class ScoreboardPlayerOut(BaseModel):
     """One player's full line in the match scoreboard."""
 
@@ -139,6 +154,15 @@ class ScoreboardPlayerOut(BaseModel):
     backpack: list[ItemRefOut] = []
     neutral_item: ItemRefOut | None = None
 
+    # Parsed replays only — null on unparsed matches.
+    lane_efficiency_pct: int | None = None
+    teamfight_participation: float | None = None
+    actions_per_min: int | None = None
+    neutral_kills: int | None = None
+    tower_kills: int | None = None
+    buyback_count: int | None = None
+    purchases: list[PurchaseOut] = []
+
 
 class MatchFullOut(BaseModel):
     """Everything about one match: both teams, inventories, and the graphs."""
@@ -154,6 +178,23 @@ class MatchFullOut(BaseModel):
     # Per-minute radiant-minus-dire. Empty on unparsed matches.
     radiant_gold_adv: list[int] = []
     radiant_xp_adv: list[int] = []
+
+    # Parsed replays only.
+    events: list[MatchEventOut] = []
+    first_blood_time: int | None = None
+    teamfight_count: int | None = None
+    comeback: int | None = None
+    stomp: int | None = None
+    # Set while a parse we requested is still queued.
+    parse_job_id: int | None = None
+
+
+class ParseStatusOut(BaseModel):
+    match_id: int
+    job_id: int | None
+    # queued while OpenDota works; done once the match came back parsed.
+    status: str
+    is_parsed: bool
 
 
 class MatchImportRequest(BaseModel):

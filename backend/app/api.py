@@ -4,7 +4,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -17,18 +17,28 @@ from app.schemas import (
     ItemOut,
     ItemRefOut,
     MatchDetailOut,
+    MatchEventOut,
     MatchFullOut,
     MatchImportRequest,
     MatchImportResult,
     MatchSummaryOut,
+    ParseStatusOut,
     PlayerOut,
+    PurchaseOut,
     ScoreboardPlayerOut,
     SyncRequest,
     SyncResult,
 )
 from app.services.cdn import cdn_image_url
+from app.services.events import build_events
 from app.services.heroes import ensure_heroes, hero_image_url
-from app.services.ingest import SlotTakenError, import_match, sync_player
+from app.services.ingest import (
+    SlotTakenError,
+    import_match,
+    poll_parse,
+    request_parse,
+    sync_player,
+)
 from app.services.items import ensure_items
 
 router = APIRouter(prefix="/api")
@@ -160,19 +170,65 @@ async def get_full_match(match_id: int, session: SessionDep) -> MatchFullOut:
         .all()
     )
 
-    # One lookup for every item id in the match rather than a query per slot.
-    wanted: set[int] = set()
+    # One lookup for the whole match rather than a query per slot. Inventories
+    # reference items by id; the purchase log references them by internal name.
+    wanted_ids: set[int] = set()
+    wanted_names: set[str] = set()
     for row in rows:
-        wanted.update(i for i in (row.items or []) if i)
-        wanted.update(i for i in (row.backpack or []) if i)
+        wanted_ids.update(i for i in (row.items or []) if i)
+        wanted_ids.update(i for i in (row.backpack or []) if i)
         if row.item_neutral:
-            wanted.add(row.item_neutral)
+            wanted_ids.add(row.item_neutral)
+        for entry in (row.timeline or {}).get("purchase_log") or []:
+            if isinstance(entry, dict) and entry.get("key"):
+                wanted_names.add(str(entry["key"]))
+
     items: dict[int, Item] = {}
-    if wanted:
+    by_name: dict[str, Item] = {}
+    if wanted_ids or wanted_names:
         found = (
-            (await session.execute(select(Item).where(Item.id.in_(wanted)))).scalars().all()
+            (
+                await session.execute(
+                    select(Item).where(
+                        or_(Item.id.in_(wanted_ids or {0}), Item.name.in_(wanted_names or {""}))
+                    )
+                )
+            )
+            .scalars()
+            .all()
         )
         items = {i.id: i for i in found}
+        by_name = {i.name: i for i in found}
+
+    # Purchase logs run to ~40 entries once tangoes and branches are counted, and
+    # a list padded with Mithril Hammers hides the timings that matter.
+    #
+    # `created` marks an item built from components, which is most finished
+    # items — but not all: Blink Dagger is bought outright and OpenDota even
+    # tags it "component". So keep anything built, plus any expensive
+    # non-consumable, and accept that a raw Demon Edge occasionally slips in.
+    def is_milestone(item: Item) -> bool:
+        if item.quality == "consumable":
+            return False
+        return item.created or (item.cost or 0) >= 2000
+
+    def purchases_for(row: MatchPlayer) -> list[PurchaseOut]:
+        out: list[PurchaseOut] = []
+        for entry in (row.timeline or {}).get("purchase_log") or []:
+            if not isinstance(entry, dict):
+                continue
+            item = by_name.get(str(entry.get("key")))
+            if item is None or not is_milestone(item):
+                continue
+            out.append(
+                PurchaseOut(
+                    time=int(entry.get("time") or 0),
+                    name=item.localized_name,
+                    image_url=cdn_image_url(item.img),
+                )
+            )
+        out.sort(key=lambda p: p.time)
+        return out
 
     def ref(item_id: int | None) -> ItemRefOut | None:
         item = items.get(item_id or 0)
@@ -210,10 +266,21 @@ async def get_full_match(match_id: int, session: SessionDep) -> MatchFullOut:
             items=refs(row.items),
             backpack=refs(row.backpack),
             neutral_item=ref(row.item_neutral),
+            lane_efficiency_pct=row.lane_efficiency_pct,
+            teamfight_participation=row.teamfight_participation,
+            actions_per_min=row.actions_per_min,
+            neutral_kills=row.neutral_kills,
+            tower_kills=row.tower_kills,
+            buyback_count=row.buyback_count,
+            purchases=purchases_for(row),
         )
         for row in rows
     ]
 
+    hero_by_slot = {
+        row.player_slot: (row.hero.localized_name if row.hero else f"hero {row.hero_id}")
+        for row in rows
+    }
     return MatchFullOut(
         match_id=match.match_id,
         start_time=match.start_time,
@@ -225,6 +292,58 @@ async def get_full_match(match_id: int, session: SessionDep) -> MatchFullOut:
         players=players,
         radiant_gold_adv=match.radiant_gold_adv or [],
         radiant_xp_adv=match.radiant_xp_adv or [],
+        events=[MatchEventOut(**e) for e in build_events(match.objectives, hero_by_slot)],
+        first_blood_time=match.first_blood_time,
+        teamfight_count=match.teamfight_count,
+        comeback=match.comeback,
+        stomp=match.stomp,
+        parse_job_id=match.parse_job_id,
+    )
+
+
+@router.post("/matches/{match_id}/parse", response_model=ParseStatusOut)
+async def start_parse(match_id: int, session: SessionDep) -> ParseStatusOut:
+    """Ask OpenDota to parse this replay, unlocking lanes, timelines and graphs.
+
+    Free but not instant — poll the GET below.
+    """
+    match = await session.get(Match, match_id)
+    if match is None:
+        raise HTTPException(404, "match not ingested — POST /api/matches/import first")
+    if match.is_parsed:
+        return ParseStatusOut(
+            match_id=match_id, job_id=None, status="done", is_parsed=True
+        )
+    try:
+        job_id = await request_parse(session, match_id)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(502, f"OpenDota error: {exc.response.status_code}") from exc
+    return ParseStatusOut(
+        match_id=match_id,
+        job_id=job_id,
+        status="queued" if job_id else "unknown",
+        is_parsed=False,
+    )
+
+
+@router.get("/matches/{match_id}/parse/{job_id}", response_model=ParseStatusOut)
+async def check_parse(match_id: int, job_id: int, session: SessionDep) -> ParseStatusOut:
+    """Poll a queued parse; re-ingests and re-analyses once it lands."""
+    match = await session.get(Match, match_id)
+    if match is None:
+        raise HTTPException(404, "match not ingested")
+    if match.is_parsed:
+        return ParseStatusOut(match_id=match_id, job_id=job_id, status="done", is_parsed=True)
+    try:
+        parsed = await poll_parse(session, match_id, job_id)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(502, f"OpenDota error: {exc.response.status_code}") from exc
+    return ParseStatusOut(
+        match_id=match_id,
+        job_id=job_id,
+        # The job can finish without a parse landing (replay unavailable).
+        status="done" if parsed else "queued",
+        is_parsed=parsed,
     )
 
 

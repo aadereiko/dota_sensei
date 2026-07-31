@@ -62,8 +62,27 @@ class OpenDotaClient:
         """Item key -> id, name, cost, components, images. Static within a patch."""
         return await self._get("/constants/items")
 
-    async def request_parse(self, match_id: int) -> dict[str, Any]:
-        """Ask OpenDota to parse a replay. Needed for timeline-level detail."""
+    async def request_parse(self, match_id: int) -> int | None:
+        """Queue a replay parse. Returns the job id, or None if none was given.
+
+        OpenDota replies {"job": {"jobId": 441320774}}. Parsing is free but not
+        instant — poll `parse_job_status` until it reports done.
+        """
         response = await self._client.post(f"/request/{match_id}")
         response.raise_for_status()
-        return response.json()
+        job = (response.json() or {}).get("job") or {}
+        job_id = job.get("jobId")
+        return int(job_id) if job_id is not None else None
+
+    async def parse_job_status(self, job_id: int) -> bool:
+        """True when the job is finished.
+
+        The endpoint returns the job object while it's queued and a null body
+        once it's gone from the queue — absence is what "done" looks like.
+        """
+        response = await self._client.get(f"/request/{job_id}")
+        if response.status_code == 404:
+            return True
+        response.raise_for_status()
+        body = response.json()
+        return not body

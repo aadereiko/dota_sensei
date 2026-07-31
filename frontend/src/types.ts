@@ -124,6 +124,33 @@ export interface ScoreboardPlayer {
   items: ItemRef[];
   backpack: ItemRef[];
   neutral_item: ItemRef | null;
+  lane_efficiency_pct: number | null;
+  teamfight_participation: number | null;
+  actions_per_min: number | null;
+  neutral_kills: number | null;
+  tower_kills: number | null;
+  buyback_count: number | null;
+  purchases: Purchase[];
+}
+
+export interface Purchase {
+  time: number;
+  name: string;
+  image_url: string | null;
+}
+
+export interface MatchEvent {
+  time: number;
+  kind: "first_blood" | "building" | "throne" | "roshan" | "aegis";
+  team: "radiant" | "dire" | null;
+  label: string;
+}
+
+export interface ParseStatus {
+  match_id: number;
+  job_id: number | null;
+  status: string;
+  is_parsed: boolean;
 }
 
 export interface MatchFull {
@@ -137,6 +164,12 @@ export interface MatchFull {
   players: ScoreboardPlayer[];
   radiant_gold_adv: number[];
   radiant_xp_adv: number[];
+  events: MatchEvent[];
+  first_blood_time: number | null;
+  teamfight_count: number | null;
+  comeback: number | null;
+  stomp: number | null;
+  parse_job_id: number | null;
 }
 
 export interface MatchSlot {
