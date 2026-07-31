@@ -15,6 +15,7 @@ dist/
 build/
 *.local
 .vite/
+*.tsbuildinfo
 
 # Editors / OS
 .DS_Store

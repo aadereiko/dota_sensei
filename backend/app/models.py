@@ -1,0 +1,175 @@
+"""ORM models.
+
+Shape of the domain:
+
+    Player  1---*  MatchPlayer  *---1  Match
+                        |
+                        *
+                     Insight
+
+`MatchPlayer` is the interesting table: one row per (match, player) and the grain
+at which every analysis rule operates. `Insight` is a materialised finding — one
+concrete mistake attached to one performance.
+"""
+
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db import Base
+
+
+class Player(Base):
+    __tablename__ = "players"
+
+    account_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    persona_name: Mapped[str | None] = mapped_column(String(128))
+    avatar_url: Mapped[str | None] = mapped_column(String(512))
+    rank_tier: Mapped[int | None] = mapped_column(Integer)
+    estimate_mmr: Mapped[int | None] = mapped_column(Integer)
+
+    # Ingest bookkeeping — lets us fetch only what's new.
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_synced_match_id: Mapped[int | None] = mapped_column(BigInteger)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    # Not a real FK relationship — see MatchPlayer.account_id for why.
+    performances: Mapped[list["MatchPlayer"]] = relationship(
+        back_populates="player",
+        primaryjoin="foreign(MatchPlayer.account_id) == Player.account_id",
+        viewonly=True,
+    )
+
+
+class Match(Base):
+    __tablename__ = "matches"
+
+    match_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    duration_seconds: Mapped[int] = mapped_column(Integer)
+    game_mode: Mapped[int | None] = mapped_column(Integer)
+    lobby_type: Mapped[int | None] = mapped_column(Integer)
+    radiant_win: Mapped[bool | None] = mapped_column(Boolean)
+    patch: Mapped[int | None] = mapped_column(Integer)
+    average_rank: Mapped[int | None] = mapped_column(Integer)
+
+    # True once we've pulled the full match, not just the summary row from
+    # /players/{id}/matches.
+    detail_fetched: Mapped[bool] = mapped_column(Boolean, default=False)
+    # True when OpenDota has parsed the replay. Only parsed matches carry
+    # lane_role, per-minute series and the purchase log — so the role-gated
+    # rules can only run on these. Use OpenDotaClient.request_parse to fill gaps.
+    is_parsed: Mapped[bool] = mapped_column(Boolean, default=False)
+    raw: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+    players: Mapped[list["MatchPlayer"]] = relationship(
+        back_populates="match", cascade="all, delete-orphan"
+    )
+
+
+class MatchPlayer(Base):
+    """One player's performance in one match."""
+
+    __tablename__ = "match_players"
+    __table_args__ = (
+        UniqueConstraint("match_id", "player_slot", name="uq_match_players_slot"),
+        Index("ix_match_players_account_hero", "account_id", "hero_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    match_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("matches.match_id", ondelete="CASCADE"), index=True
+    )
+    # Deliberately NOT a foreign key to players. Ingesting one match writes all
+    # ten rows, and we only hold Player profiles for accounts we've explicitly
+    # synced — an FK here would reject the other nine. Null when the account is
+    # private/anonymous.
+    account_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+
+    player_slot: Mapped[int] = mapped_column(Integer)
+    is_radiant: Mapped[bool] = mapped_column(Boolean)
+    won: Mapped[bool] = mapped_column(Boolean)
+    hero_id: Mapped[int] = mapped_column(Integer, index=True)
+    lane_role: Mapped[int | None] = mapped_column(Integer)
+    is_roaming: Mapped[bool | None] = mapped_column(Boolean)
+
+    # --- Core stat line ---
+    kills: Mapped[int | None] = mapped_column(Integer)
+    deaths: Mapped[int | None] = mapped_column(Integer)
+    assists: Mapped[int | None] = mapped_column(Integer)
+    last_hits: Mapped[int | None] = mapped_column(Integer)
+    denies: Mapped[int | None] = mapped_column(Integer)
+    gold_per_min: Mapped[int | None] = mapped_column(Integer)
+    xp_per_min: Mapped[int | None] = mapped_column(Integer)
+    net_worth: Mapped[int | None] = mapped_column(Integer)
+    hero_damage: Mapped[int | None] = mapped_column(Integer)
+    tower_damage: Mapped[int | None] = mapped_column(Integer)
+    hero_healing: Mapped[int | None] = mapped_column(Integer)
+    obs_placed: Mapped[int | None] = mapped_column(Integer)
+    sen_placed: Mapped[int | None] = mapped_column(Integer)
+    camps_stacked: Mapped[int | None] = mapped_column(Integer)
+    stuns_seconds: Mapped[float | None] = mapped_column(Float)
+
+    # --- Series & derived blobs (only present once detail is fetched) ---
+    # gold_t / xp_t / lh_t per-minute arrays, purchase_log, kills_log, etc.
+    timeline: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # OpenDota's own percentile benchmarks for this hero (gpm, xpm, kda, ...).
+    benchmarks: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # {"blink": 812, "black_king_bar": 1455, ...} seconds into the match.
+    item_timings: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+    match: Mapped["Match"] = relationship(back_populates="players")
+    player: Mapped["Player | None"] = relationship(
+        back_populates="performances",
+        primaryjoin="foreign(MatchPlayer.account_id) == Player.account_id",
+        viewonly=True,
+    )
+    insights: Mapped[list["Insight"]] = relationship(
+        back_populates="performance", cascade="all, delete-orphan"
+    )
+
+
+class Insight(Base):
+    """A single mistake (or notable pattern) found by one analysis rule."""
+
+    __tablename__ = "insights"
+    __table_args__ = (
+        UniqueConstraint("match_player_id", "rule_key", name="uq_insights_rule"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    match_player_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("match_players.id", ondelete="CASCADE"), index=True
+    )
+
+    rule_key: Mapped[str] = mapped_column(String(64), index=True)
+    severity: Mapped[str] = mapped_column(String(16))  # info | warn | critical
+    title: Mapped[str] = mapped_column(String(200))
+    detail: Mapped[str] = mapped_column(Text)
+    # Numbers behind the verdict, so the UI can render a chart or a "yours vs
+    # benchmark" comparison without re-running the rule.
+    metrics: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    performance: Mapped["MatchPlayer"] = relationship(back_populates="insights")

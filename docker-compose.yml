@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: dota_sensei_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dota_sensei}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dota_sensei}
+      POSTGRES_DB: ${POSTGRES_DB:-dota_sensei}
+    ports:
+      # 5473 on the host -> 5432 in the container.
+      # 5432 is the system default and 5433 belongs to psy/computational-learning.
+      - "${POSTGRES_PORT:-5473}:5432"
+    volumes:
+      - dota_sensei_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dota_sensei} -d ${POSTGRES_DB:-dota_sensei}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  dota_sensei_pgdata:
