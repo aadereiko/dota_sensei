@@ -13,16 +13,12 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Hero
+from app.services.cdn import cdn_image_url
 from app.services.opendota import OpenDotaClient
-
-# OpenDota returns CDN-relative paths like /apps/dota2/images/.../rubick.png?
-HERO_IMAGE_BASE = "https://cdn.cloudflare.steamstatic.com"
 
 
 def hero_image_url(path: str | None) -> str | None:
-    if not path:
-        return None
-    return f"{HERO_IMAGE_BASE}{path.rstrip('?')}"
+    return cdn_image_url(path)
 
 
 async def sync_heroes(session: AsyncSession, client: OpenDotaClient | None = None) -> int:

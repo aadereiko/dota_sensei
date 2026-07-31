@@ -2,6 +2,8 @@
 
 import type {
   CurrentUser,
+  Hero,
+  Item,
   MatchDetail,
   MatchImportResult,
   MatchSummary,
@@ -35,6 +37,10 @@ export const api = {
   health: () => request<{ status: string; database: string }>("/health"),
 
   config: () => request<{ default_account_id: number | null }>("/config"),
+
+  heroes: () => request<Hero[]>("/heroes"),
+
+  items: () => request<Item[]>("/items"),
 
   me: () => request<CurrentUser>("/auth/me"),
 

@@ -80,7 +80,7 @@ export default function App() {
   });
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10">
+    <>
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border-subtle pb-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">dota_sensei</h1>
@@ -227,6 +227,6 @@ export default function App() {
           </section>
         </div>
       )}
-    </div>
+    </>
   );
 }

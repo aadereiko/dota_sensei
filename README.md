@@ -60,10 +60,11 @@ Vite uses `strictPort`, so a clash fails loudly instead of silently drifting to 
 
 ### Data model
 
-`heroes` caches OpenDota's `/constants/heroes` (127 rows, changes per patch, no
-API key). It supplies display names and icons, and — more importantly — the
-`roles` tags that let the analysis rules tell a support from a core on an
-unparsed match. It's populated lazily on first sync or import.
+`heroes` and `items` cache OpenDota's `/constants/*` (127 and 501 rows, static
+within a patch, no API key). Heroes supply display names, icons, and the `roles`
+tags that let the analysis rules tell a support from a core on an unparsed match.
+Items are the reference page today and the lookup that will turn a purchase log's
+numeric ids into "Black King Bar at 14:32". Both populate lazily on first use.
 
 `match_players` is the grain everything hangs off — one row per (match, player),
 holding the stat line plus JSONB blobs for the per-minute series (`timeline`),
@@ -203,9 +204,18 @@ frontend/
   src/
     api.ts               typed fetch wrappers
     types.ts             mirrors schemas.py
+    main.tsx             router: / (matches), /heroes, /items
     App.tsx              recurring mistakes + match list + breakdown
+    pages/
+      HeroesPage.tsx     all heroes, filter by attribute and role
+      ItemsPage.tsx      all items, filter by bucket and quality
     components/
+      Layout.tsx         nav tabs + shared page furniture
 ```
+
+Routing is `react-router-dom` with `BrowserRouter`, so deep links like `/heroes`
+need the server to fall back to `index.html`. Vite's dev server does this out of
+the box; a production static host needs it configured.
 
 ### API
 
@@ -213,6 +223,8 @@ frontend/
 | --- | --- | --- |
 | GET | `/api/health` | liveness + DB check |
 | GET | `/api/config` | default account id for the UI |
+| GET | `/api/heroes` | all 127 heroes |
+| GET | `/api/items` | all 501 items |
 | GET | `/api/auth/steam/login` | 302 to Steam |
 | GET | `/api/auth/steam/callback` | verify, start session, 302 back to the app |
 | GET | `/api/auth/me` | signed-in user (401 if not) |

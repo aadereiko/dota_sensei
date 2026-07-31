@@ -58,6 +58,10 @@ class OpenDotaClient:
         """Hero id -> name, roles, images. Static within a patch."""
         return await self._get("/constants/heroes")
 
+    async def item_constants(self) -> dict[str, Any]:
+        """Item key -> id, name, cost, components, images. Static within a patch."""
+        return await self._get("/constants/items")
+
     async def request_parse(self, match_id: int) -> dict[str, Any]:
         """Ask OpenDota to parse a replay. Needed for timeline-level detail."""
         response = await self._client.post(f"/request/{match_id}")

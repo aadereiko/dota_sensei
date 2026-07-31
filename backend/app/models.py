@@ -59,6 +59,36 @@ class Hero(Base):
     )
 
 
+class Item(Base):
+    """Item metadata from OpenDota's /constants/items.
+
+    Cached for the same reasons as `Hero`: static within a patch, and needed to
+    turn the numeric item ids in a purchase log into something readable.
+    """
+
+    __tablename__ = "items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # blink
+    localized_name: Mapped[str] = mapped_column(String(128))  # Blink Dagger
+    cost: Mapped[int | None] = mapped_column(Integer)
+    # component | common | rare | epic | artifact | consumable | secret_shop.
+    # Null for recipes and neutrals.
+    quality: Mapped[str | None] = mapped_column(String(32), index=True)
+    # 1-5 for neutral items, null otherwise.
+    tier: Mapped[int | None] = mapped_column(Integer, index=True)
+    # True when the item is built from a recipe rather than bought outright.
+    created: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Internal names of the parts, e.g. ["mithril_hammer", "ogre_axe"].
+    components: Mapped[list[str] | None] = mapped_column(JSONB)
+    notes: Mapped[str | None] = mapped_column(Text)
+    img: Mapped[str | None] = mapped_column(String(256))
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class Player(Base):
     __tablename__ = "players"
 

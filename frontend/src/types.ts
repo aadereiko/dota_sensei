@@ -3,6 +3,30 @@
 
 export type Severity = "info" | "warn" | "critical";
 
+export interface Hero {
+  id: number;
+  name: string;
+  localized_name: string;
+  primary_attr: string | null;
+  attack_type: string | null;
+  roles: string[];
+  image_url: string | null;
+  icon_url: string | null;
+}
+
+export interface Item {
+  id: number;
+  name: string;
+  localized_name: string;
+  cost: number | null;
+  quality: string | null;
+  tier: number | null;
+  created: boolean;
+  components: string[] | null;
+  notes: string | null;
+  image_url: string | null;
+}
+
 export interface Insight {
   rule_key: string;
   severity: Severity;

@@ -21,6 +21,30 @@ class PlayerOut(ORMModel):
     last_synced_at: datetime | None
 
 
+class HeroOut(BaseModel):
+    id: int
+    name: str
+    localized_name: str
+    primary_attr: str | None
+    attack_type: str | None
+    roles: list[str]
+    image_url: str | None
+    icon_url: str | None
+
+
+class ItemOut(BaseModel):
+    id: int
+    name: str
+    localized_name: str
+    cost: int | None
+    quality: str | None
+    tier: int | None
+    created: bool
+    components: list[str] | None
+    notes: str | None
+    image_url: str | None
+
+
 class CurrentUser(BaseModel):
     account_id: int
     # A JS number can't hold a 17-digit SteamID64 exactly, so send it as a string.

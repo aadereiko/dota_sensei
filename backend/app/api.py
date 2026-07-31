@@ -11,8 +11,10 @@ from sqlalchemy.orm import selectinload
 from app.auth import OptionalAccount
 from app.config import Settings, get_settings
 from app.db import get_session
-from app.models import Insight, Match, MatchPlayer, Player
+from app.models import Hero, Insight, Item, Match, MatchPlayer, Player
 from app.schemas import (
+    HeroOut,
+    ItemOut,
     MatchDetailOut,
     MatchImportRequest,
     MatchImportResult,
@@ -21,8 +23,10 @@ from app.schemas import (
     SyncRequest,
     SyncResult,
 )
-from app.services.heroes import hero_image_url
+from app.services.cdn import cdn_image_url
+from app.services.heroes import ensure_heroes, hero_image_url
 from app.services.ingest import SlotTakenError, import_match, sync_player
+from app.services.items import ensure_items
 
 router = APIRouter(prefix="/api")
 
@@ -42,6 +46,52 @@ async def health(session: SessionDep) -> dict[str, str]:
 async def client_config(settings: SettingsDep) -> dict[str, int | None]:
     """Lets the UI preload the owner's account without hardcoding it."""
     return {"default_account_id": settings.default_account_id}
+
+
+@router.get("/heroes", response_model=list[HeroOut])
+async def list_heroes(session: SessionDep) -> list[HeroOut]:
+    """Every hero. Populates the cache on first call."""
+    await ensure_heroes(session)
+    heroes = (
+        (await session.execute(select(Hero).order_by(Hero.localized_name))).scalars().all()
+    )
+    return [
+        HeroOut(
+            id=h.id,
+            name=h.name,
+            localized_name=h.localized_name,
+            primary_attr=h.primary_attr,
+            attack_type=h.attack_type,
+            roles=h.roles or [],
+            image_url=cdn_image_url(h.img),
+            icon_url=cdn_image_url(h.icon),
+        )
+        for h in heroes
+    ]
+
+
+@router.get("/items", response_model=list[ItemOut])
+async def list_items(session: SessionDep) -> list[ItemOut]:
+    """Every item. Populates the cache on first call."""
+    await ensure_items(session)
+    items = (
+        (await session.execute(select(Item).order_by(Item.localized_name))).scalars().all()
+    )
+    return [
+        ItemOut(
+            id=i.id,
+            name=i.name,
+            localized_name=i.localized_name,
+            cost=i.cost,
+            quality=i.quality,
+            tier=i.tier,
+            created=i.created,
+            components=i.components,
+            notes=i.notes,
+            image_url=cdn_image_url(i.img),
+        )
+        for i in items
+    ]
 
 
 @router.post("/sync", response_model=SyncResult)
